@@ -1,0 +1,102 @@
+---
+- name: Pre checks
+  hosts: all
+  become: true
+
+  tasks:
+    - name: Check Space
+      shell: df -Th
+      register: Space
+
+    - debug:
+        var: Space.stdout_lines
+
+
+    - name: checking service status
+      command: systemctl status "{{ item }}"
+      with_items:
+      - firewalld
+#      - sshd
+      register: result
+      ignore_errors: yes
+    
+    - name: showing report
+      debug:
+       var: result.stdout_lines
+
+
+    - name: Populate service facts
+      ansible.builtin.service_facts:
+
+    - name: Print service facts
+      ansible.builtin.debug:
+        var: ansible_facts.services['firewalld.service']
+ #   - name: Get disk size 
+ #     set_fact:
+ #       diskSize: "{{mountresponse.stdout}}"
+
+
+    - name: "Check firewall service"
+      shell:  systemctl status firewalld |  grep "Active:" | awk '{print $2 $3}'
+      changed_when: false
+      register: echo_results
+
+    - name: "Please check the firewall"
+      debug: 
+        msg:  "{{inventory_hostname}} The firewall is running"
+      when: echo_results.stdout == "active(running)"
+
+    - name: Clean Cache
+      shell: yum clean all
+#      warning: false
+
+    - name: Check repository
+      shell: yum repolist  > /dev/null 2>&1; if [ $? -eq 0 ]; then echo "Repository found"; else echo "No repository found"; fi
+      register: repo_status
+                      
+    - name: Fail if no repository found
+      fail:
+        msg: "repository not found on {{ ansible_hostname }}"
+      when: repo_status.stdout != "Repository found"
+
+
+    - name: Check /tmp freespace
+      shell: df /tmp --output\=avail | tail -1
+      register: tmp_freespace
+            
+    - fail:
+        msg: "{{ansible_hostname}} /tmp does not have the minimum space required to continue (2Gb requested)"
+      when: tmp_freespace.stdout|float is lt 2000000
+
+
+    - name: Check update
+      shell: yum check-update
+      register: check
+
+    - name: Update report
+      debug:
+       var: check.stdout
+
+    - name: Patch the system
+      yum:
+        name: "*"
+        state: latest
+
+
+#    - name: Collect only facts about hardware
+#      setup:
+#         gather_subset:
+#           - 'hardware'
+#
+#    - name: Test for available disk space
+#      setup: filter=ansible_mounts
+#       
+#    - name: Ensure that free space on the tested volume is greater than 15%
+#      assert:
+#         that:
+#           - mount.size_available > mount.size_total|float * 0.05
+#         msg: Disk space has reached 95% threshold
+#      vars:
+#         mount: "{{ ansible_mounts | selectattr('mount','equalto',item.mount) | list | first }}"
+#      with_items:
+#         - "{{ ansible_mounts }}" 
